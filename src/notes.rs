@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub const NOTE_BANG_PREFIX: &str = "note:";
 pub const DEFAULT_NOTE_FILE: &str = "notes.md";
