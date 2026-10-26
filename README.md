@@ -1,6 +1,6 @@
 # ⚡ cmdpal-rs
 
-[![Build Status](https://github.com/nayaksudhanshu120999/r/actions/workflows/build.yml/badge.svg)](https://github.com/nayaksudhanshu120999/r/actions)
+[![Build Status](https://github.com/nayaksudhanshu120999/s/actions/workflows/build.yml/badge.svg)](https://github.com/nayaksudhanshu120999/s/actions)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?logo=windows)
 ![Rust](https://img.shields.io/badge/rust-2021%20edition-dea584?logo=rust)
 ![UI](https://img.shields.io/badge/UI-Slint%201.8-6366f1)

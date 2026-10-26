@@ -88,7 +88,8 @@ pub fn build_custom_files_index(custom_paths: &[String]) -> Vec<ScannedFileEntry
             continue;
         }
 
-        let root = PathBuf::from(trimmed);
+let expanded = crate::engine::expand_env_and_tilde(trimmed);
+        let root = PathBuf::from(expanded);
         if !root.exists() {
             continue;
         }

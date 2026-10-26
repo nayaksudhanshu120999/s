@@ -78,6 +78,7 @@ export component PaletteWindow inherits Window {
     in-out property <string> query-text: "";
     in-out property <string> active-bang: "";
     in-out property <string> active-bang-label: "";
+    in-out property <string> hotkey-label: "Ctrl+Space";
     in-out property <[UIResultItem]> results: [];
     in-out property <int> selected-index: 0;
     in-out property <length> dynamic-height: 68px;
@@ -355,7 +356,7 @@ export component PaletteWindow inherits Window {
                             border-color: root.theme.border;
 
                             Text {
-                                text: "Ctrl+Space";
+                                text: root.hotkey-label;
                                 color: root.theme.text-muted;
                                 font-size: 10px;
                                 font-weight: 600;

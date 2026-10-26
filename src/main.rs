@@ -69,6 +69,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let palette_ui = PaletteWindow::new()?;
     palette_ui.set_app_icon(app_icon.clone());
     palette_ui.set_theme(initial_theme.clone());
+    palette_ui.set_hotkey_label(SharedString::from(engine.config.hotkey.as_str()));
     palette_ui.set_dynamic_height(COMPACT_HEIGHT);
     palette_ui
         .window()
@@ -376,6 +377,10 @@ fn main() -> Result<(), slint::PlatformError> {
                             }
                             if let Some(pal) = ui_weak.upgrade() {
                                 pal.set_theme(ui_theme.clone());
+                                pal.set_hotkey_label(SharedString::from(
+                                    state_ref.borrow().engine.config.hotkey.as_str(),
+                                ));
+                            }
                             }
                             if let Some(settings_win) = settings_weak.upgrade() {
                                 settings_win.set_theme(ui_theme);
@@ -736,6 +741,9 @@ fn wire_settings_callbacks(
             };
             if let Some(pal) = palette_weak.upgrade() {
                 pal.set_theme(ui_theme);
+                pal.set_hotkey_label(SharedString::from(
+                    state_ref.borrow().engine.config.hotkey.as_str(),
+                ));
             }
             if let Some(win) = settings_weak.upgrade() {
                 sync_settings_ui(&win, &state_ref.borrow().engine);

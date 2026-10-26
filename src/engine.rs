@@ -694,7 +694,7 @@ impl QueryEngine {
     }
 }
 
-fn expand_env_and_tilde(input: &str) -> String {
+pub fn expand_env_and_tilde(input: &str) -> String {
     let mut out = input.to_string();
 
     if out == "~" || out.starts_with("~/") || out.starts_with(r"~\") {

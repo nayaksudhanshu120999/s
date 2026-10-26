@@ -194,7 +194,15 @@ impl AppConfig {
         self.normalize();
         let resolved = Self::resolve_config_path(path);
         if let Ok(serialized) = toml::to_string_pretty(self) {
-            let _ = fs::write(resolved, serialized);
+            let tmp = resolved.with_extension("toml.tmp");
+            if fs::write(&tmp, &serialized).is_ok() {
+                if fs::rename(&tmp, &resolved).is_err() {
+                    let _ = fs::write(&resolved, &serialized);
+                    let _ = fs::remove_file(&tmp);
+                }
+            } else {
+                let _ = fs::write(&resolved, serialized);
+            }
         }
         crate::system::apply_runtime_system_config(self.run_on_startup, &self.hotkey);
     }
