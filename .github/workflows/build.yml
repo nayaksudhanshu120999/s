@@ -1,0 +1,53 @@
+name: Build Windows Release Artifact
+
+on:
+  # Allows you to manually trigger the build from the GitHub "Actions" tab
+  workflow_dispatch:
+  # Also builds automatically whenever you push code to main/master
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-windows:
+    name: Build Release (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain (Stable MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo Registry and Target Directory
+        uses: Swatinem/rust-cache@v2
+
+      - name: Compile Release Binary
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Stage Release Bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/cmdpal-rs.exe" -Destination "dist/cmdpal-rs.exe"
+          Copy-Item "config.toml" -Destination "dist/config.toml"
+          Get-ChildItem -Path dist
+
+      - name: Upload Collectible Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmdpal-rs-windows-x64
+          path: |
+            dist/cmdpal-rs.exe
+            dist/config.toml
+          retention-days: 30
+          if-no-files-found: error
