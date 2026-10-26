@@ -5,6 +5,7 @@
 *.pdb
 
 # User runtime notes (keep repo clean while preserving config.toml & EXTENSIONS_GUIDE.md)
+/markdown/
 notes.md
 notes.txt
 
@@ -18,8 +19,3 @@ notes.txt
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# User runtime notes (keep repo clean while preserving config.toml & EXTENSIONS_GUIDE.md)
-/markdown/
-notes.md
-notes.txt
