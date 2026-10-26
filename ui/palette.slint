@@ -1,0 +1,2654 @@
+import { ScrollView } from "std-widgets.slint";
+
+export struct UIResultItem {
+    title: string,
+    badge: string,
+    category: string,
+    category-header: string,
+    icon-text: string,
+    score-text: string,
+    can-elevate: bool,
+    is-first-in-category: bool,
+}
+
+export struct UIMarkdownBlock {
+    kind: string,
+    text: string,
+    subtext: string,
+}
+
+export struct UICategoryOrderItem {
+    id: string,
+    label: string,
+    description: string,
+}
+
+export struct UIAppToggleItem {
+    name: string,
+    visible: bool,
+}
+
+export struct UISimpleEntry {
+    name: string,
+    target: string,
+}
+
+export struct UIBangEntry {
+    key: string,
+    url: string,
+}
+
+export struct UIThemeColors {
+    window-bg: color,
+    surface-bg: color,
+    card-bg: color,
+    hover-bg: color,
+    selected-bg: color,
+    border: color,
+    accent: color,
+    text-primary: color,
+    text-secondary: color,
+    text-muted: color,
+}
+
+export component PaletteWindow inherits Window {
+    title: "Command Palette";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    width: 680px;
+    height: root.dynamic-height;
+    icon: root.app-icon;
+
+    in property <image> app-icon;
+    // Default theme: exact PowerToys Command Palette (Windows 11 Dark Acrylic/Fluent)
+    in-out property <UIThemeColors> theme: {
+        window-bg: #1f1f1f,
+        surface-bg: #2b2b2b,
+        card-bg: #282828,
+        hover-bg: #323232,
+        selected-bg: #383838,
+        border: #3d3d3d,
+        accent: #60cdff,
+        text-primary: #ffffff,
+        text-secondary: #d6d6d6,
+        text-muted: #9d9d9d,
+    };
+
+    in-out property <string> query-text: "";
+    in-out property <string> active-bang: "";
+    in-out property <string> active-bang-label: "";
+    in-out property <[UIResultItem]> results: [];
+    in-out property <int> selected-index: 0;
+    in-out property <length> dynamic-height: 68px;
+    in-out property <length> scroll-y: 0px;
+
+    // Markdown Note Bang & Live Preview properties
+    in-out property <bool> is-note-mode: false;
+    in-out property <string> active-note-file: "notes.md";
+    in-out property <[string]> note-files: [];
+    in-out property <[UIMarkdownBlock]> note-preview-blocks: [];
+    in-out property <string> note-status-text: "";
+
+    in-out property <bool> context-menu-visible: false;
+    in-out property <int> context-menu-index: -1;
+    in-out property <length> context-menu-x: 0px;
+    in-out property <length> context-menu-y: 0px;
+    in-out property <bool> context-menu-can-elevate: false;
+
+    callback query-changed(string);
+    callback clear-active-bang();
+    callback activate-item(int);
+    callback run-item-admin(int);
+    callback open-settings();
+    callback escape-pressed();
+
+    // Note mode callbacks
+    callback submit-note(string);
+    callback switch-note-file(string);
+    callback cycle-note-file(bool);
+
+    public function focus-input() {
+        search-input.focus();
+    }
+
+    function sync-scroll-to-selection() {
+        if (root.selected-index <= 1) {
+            root.scroll-y = 0px;
+        } else {
+            let approx-y = root.selected-index * 46px;
+            if (approx-y > 240px) {
+                root.scroll-y = -(approx-y - 210px);
+            }
+        }
+    }
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: root.theme.window-bg;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: root.theme.border;
+        clip: true;
+
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+
+            // Top Search Bar (PowerToys CmdPal Style + Bang Pill Chip)
+            Rectangle {
+                height: 48px;
+                background: root.theme.surface-bg;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: search-input.has-focus ? root.theme.accent : root.theme.border;
+                clip: true;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    alignment: stretch;
+
+                    VerticalLayout {
+                        alignment: center;
+                        width: 24px;
+                        Image {
+                            source: root.app-icon;
+                            width: 22px;
+                            height: 22px;
+                        }
+                    }
+
+                    // Bang Pill Chip (shown when user types e.g. "yt " or "note ")
+                    if root.active-bang != "" : VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 28px;
+                            border-radius: 14px;
+                            background: root.theme.selected-bg;
+                            border-width: 1px;
+                            border-color: root.theme.accent;
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 8px;
+                                spacing: 6px;
+                                alignment: center;
+
+                                Text {
+                                    text: (root.is-note-mode ? "📝 " : "🌐 ") + root.active-bang-label;
+                                    color: root.theme.accent;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: "✕";
+                                    color: root.theme.text-muted;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.clear-active-bang();
+                                    search-input.focus();
+                                }
+                            }
+                        }
+                    }
+
+                    // Search Input Area
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        clip: true;
+
+                        if root.query-text == "" : Text {
+                            x: 0px;
+                            text: root.is-note-mode
+                                ? ("Write note for " + root.active-note-file + " (Enter saves in '''...''', !file+Space switches .md)...")
+                                : (root.active-bang != ""
+                                    ? ("Type search query for " + root.active-bang-label + " (Backspace to remove chip)...")
+                                    : "Type a command, setting, app, file, or bang (e.g. note + Space, yt + Space)...");
+                            color: root.theme.text-muted;
+                            font-size: 14px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                        }
+
+                        search-input := TextInput {
+                            width: 100%;
+                            height: 100%;
+                            text <=> root.query-text;
+                            color: root.theme.text-primary;
+                            font-size: 15px;
+                            vertical-alignment: center;
+                            single-line: true;
+
+                            edited => {
+                                root.context-menu-visible = false;
+                                if (!root.is-note-mode) {
+                                    root.scroll-y = 0px;
+                                }
+                                root.query-changed(self.text);
+                            }
+
+                            accepted => {
+                                if root.is-note-mode {
+                                    root.submit-note(self.text);
+                                } else if root.results.length > 0 && root.selected-index >= 0 {
+                                    root.activate-item(root.selected-index);
+                                }
+                            }
+
+                            key-pressed(event) => {
+                                // Backspace on empty input removes the active Bang Pill Chip
+                                if (event.text == Key.Backspace && root.query-text == "" && root.active-bang != "") {
+                                    root.clear-active-bang();
+                                    return accept;
+                                }
+                                // Ctrl + Enter -> Run as Administrator (or save note in note mode)
+                                if (event.modifiers.control && event.text == Key.Return) {
+                                    if (root.is-note-mode) {
+                                        root.submit-note(self.text);
+                                    } else if (root.results.length > 0 && root.selected-index >= 0) {
+                                        root.run-item-admin(root.selected-index);
+                                    }
+                                    return accept;
+                                }
+                                // Ctrl + , -> Open Settings GUI
+                                if (event.modifiers.control && event.text == ",") {
+                                    root.open-settings();
+                                    return accept;
+                                }
+                                // In Note Mode: Tab / Shift+Tab cycles through .md files in markdown/
+                                if (root.is-note-mode && event.text == Key.Tab) {
+                                    root.cycle-note-file(event.modifiers.shift);
+                                    return accept;
+                                }
+                                // In Note Mode: Up/Down/PageUp/PageDown scrolls the Markdown Preview
+                                if (root.is-note-mode && event.text == Key.DownArrow) {
+                                    root.scroll-y = root.scroll-y - 36px;
+                                    return accept;
+                                }
+                                if (root.is-note-mode && event.text == Key.UpArrow) {
+                                    root.scroll-y = Math.min(0px, root.scroll-y + 36px);
+                                    return accept;
+                                }
+                                if (root.is-note-mode && event.text == Key.PageDown) {
+                                    root.scroll-y = root.scroll-y - 160px;
+                                    return accept;
+                                }
+                                if (root.is-note-mode && event.text == Key.PageUp) {
+                                    root.scroll-y = Math.min(0px, root.scroll-y + 160px);
+                                    return accept;
+                                }
+                                // Normal Mode: DownArrow or Tab -> Next item (with wrap-around & auto-scroll)
+                                if (event.text == Key.DownArrow || (event.text == Key.Tab && !event.modifiers.shift)) {
+                                    root.context-menu-visible = false;
+                                    if (root.results.length > 0) {
+                                        root.selected-index = Math.mod(root.selected-index + 1, root.results.length);
+                                        root.sync-scroll-to-selection();
+                                    }
+                                    return accept;
+                                }
+                                // Normal Mode: UpArrow or Shift+Tab -> Previous item (with wrap-around & auto-scroll)
+                                if (event.text == Key.UpArrow || (event.text == Key.Tab && event.modifiers.shift)) {
+                                    root.context-menu-visible = false;
+                                    if (root.results.length > 0) {
+                                        root.selected-index = Math.mod(root.selected-index - 1 + root.results.length, root.results.length);
+                                        root.sync-scroll-to-selection();
+                                    }
+                                    return accept;
+                                }
+                                // Normal Mode: PageDown -> Jump 5 items forward
+                                if (event.text == Key.PageDown) {
+                                    root.context-menu-visible = false;
+                                    if (root.results.length > 0) {
+                                        root.selected-index = Math.min(root.selected-index + 5, root.results.length - 1);
+                                        root.sync-scroll-to-selection();
+                                    }
+                                    return accept;
+                                }
+                                // Normal Mode: PageUp -> Jump 5 items back
+                                if (event.text == Key.PageUp) {
+                                    root.context-menu-visible = false;
+                                    if (root.results.length > 0) {
+                                        root.selected-index = Math.max(root.selected-index - 5, 0);
+                                        root.sync-scroll-to-selection();
+                                    }
+                                    return accept;
+                                }
+                                if (event.text == Key.Escape) {
+                                    if (root.context-menu-visible) {
+                                        root.context-menu-visible = false;
+                                    } else if (root.query-text == "" && root.active-bang != "") {
+                                        root.clear-active-bang();
+                                    } else {
+                                        root.escape-pressed();
+                                    }
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+                    }
+
+                    // Shortcut Pill
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 24px;
+                            width: 76px;
+                            border-radius: 5px;
+                            background: root.theme.card-bg;
+                            border-width: 1px;
+                            border-color: root.theme.border;
+
+                            Text {
+                                text: "Ctrl+Space";
+                                color: root.theme.text-muted;
+                                font-size: 10px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Settings Gear Button
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 32px;
+                            height: 30px;
+                            border-radius: 6px;
+                            background: settings-touch.has-hover ? root.theme.selected-bg : root.theme.card-bg;
+                            border-width: 1px;
+                            border-color: settings-touch.has-hover ? root.theme.accent : root.theme.border;
+
+                            Text {
+                                text: "⚙";
+                                color: root.theme.text-primary;
+                                font-size: 15px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            settings-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.open-settings();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // =====================================================================
+            // MARKDOWN PREVIEW PANEL (Shown in place of suggestions in Note Mode)
+            // =====================================================================
+            if root.is-note-mode : VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 6px;
+
+                // .md File Switcher Bar (switch via bang !name+Space, Tab, or clicking a pill)
+                Rectangle {
+                    height: 32px;
+                    background: root.theme.surface-bg;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: root.theme.border;
+                    clip: true;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 6px;
+                        alignment: start;
+
+                        Text {
+                            text: "📂 markdown/";
+                            color: root.theme.text-muted;
+                            font-size: 11px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+
+                        for md-file in root.note-files : VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                height: 22px;
+                                border-radius: 5px;
+                                background: md-file == root.active-note-file ? root.theme.selected-bg : root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: md-file == root.active-note-file ? root.theme.accent : root.theme.border;
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    Text {
+                                        text: "📄 " + md-file;
+                                        color: md-file == root.active-note-file ? root.theme.accent : root.theme.text-secondary;
+                                        font-size: 11px;
+                                        font-weight: md-file == root.active-note-file ? 700 : 500;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.switch-note-file(md-file);
+                                        search-input.focus();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Live Draft Note Banner (shows how the typed line will be wrapped in ''' ... ''')
+                if root.query-text != "" : Rectangle {
+                    background: root.theme.selected-bg;
+                    border-radius: 7px;
+                    border-width: 1px;
+                    border-color: root.theme.accent;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 3px;
+
+                        Text {
+                            text: "✍️ Draft Note for markdown/" + root.active-note-file + " (Press Enter to save with current Date & Time):";
+                            color: root.theme.accent;
+                            font-size: 10px;
+                            font-weight: 700;
+                        }
+
+                        Text {
+                            text: "''' " + root.query-text + " '''";
+                            color: root.theme.text-primary;
+                            font-size: 13px;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // Formatted Markdown Content ScrollView
+                ScrollView {
+                    vertical-stretch: 1;
+                    width: 100%;
+                    content-y <=> root.scroll-y;
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        padding-right: 6px;
+                        alignment: start;
+
+                        for block in root.note-preview-blocks : VerticalLayout {
+                            spacing: 2px;
+
+                            // H1 Document Title
+                            if block.kind == "h1" : Rectangle {
+                                background: root.theme.surface-bg;
+                                border-radius: 7px;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+
+                                HorizontalLayout {
+                                    padding: 10px;
+                                    alignment: space-between;
+
+                                    Text {
+                                        text: block.text;
+                                        color: root.theme.text-primary;
+                                        font-size: 16px;
+                                        font-weight: 800;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: block.subtext;
+                                        color: root.theme.accent;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Visual Separator for Different Days
+                            if block.kind == "separator" : Rectangle {
+                                height: 28px;
+                                background: transparent;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        height: 20px;
+                                        border-radius: 4px;
+                                        background: root.theme.surface-bg;
+                                        border-width: 1px;
+                                        border-color: root.theme.border;
+
+                                        Text {
+                                            text: "══════════════════  ✦ DIFFERENT DAY ✦  ══════════════════";
+                                            color: root.theme.accent;
+                                            font-size: 10px;
+                                            font-weight: 800;
+                                            letter-spacing: 1px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Date Group Header (1 full day section)
+                            if block.kind == "date" : Rectangle {
+                                height: 30px;
+                                background: root.theme.card-bg;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: root.theme.accent;
+
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    alignment: space-between;
+
+                                    Text {
+                                        text: block.text;
+                                        color: root.theme.accent;
+                                        font-size: 13px;
+                                        font-weight: 800;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: block.subtext;
+                                        color: root.theme.text-muted;
+                                        font-size: 10px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // H3 Subheading
+                            if block.kind == "h3" : HorizontalLayout {
+                                padding-left: 6px;
+                                padding-top: 4px;
+                                Text {
+                                    text: block.text;
+                                    color: root.theme.text-secondary;
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            // Timestamp Row
+                            if block.kind == "timestamp" : HorizontalLayout {
+                                padding-left: 6px;
+                                padding-top: 2px;
+                                Text {
+                                    text: block.text;
+                                    color: root.theme.text-muted;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                }
+                            }
+
+                            // Triple-Quoted Note Card (''' ... ''')
+                            if block.kind == "note" : Rectangle {
+                                background: root.theme.card-bg;
+                                border-radius: 7px;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+
+                                HorizontalLayout {
+                                    padding: 8px;
+                                    spacing: 8px;
+
+                                    Rectangle {
+                                        width: 3px;
+                                        border-radius: 1.5px;
+                                        background: root.theme.accent;
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: block.text;
+                                        color: root.theme.text-primary;
+                                        font-size: 13px;
+                                        font-weight: 500;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            // Code Block
+                            if block.kind == "code" : Rectangle {
+                                background: root.theme.surface-bg;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+
+                                HorizontalLayout {
+                                    padding: 8px;
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: block.text;
+                                        color: root.theme.accent;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            // Blockquote
+                            if block.kind == "quote" : Rectangle {
+                                background: root.theme.surface-bg;
+                                border-radius: 5px;
+
+                                HorizontalLayout {
+                                    padding: 6px;
+                                    spacing: 8px;
+
+                                    Rectangle {
+                                        width: 3px;
+                                        background: root.theme.text-muted;
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: block.text;
+                                        color: root.theme.text-secondary;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            // Bullet Item
+                            if block.kind == "bullet" : HorizontalLayout {
+                                padding-left: 10px;
+                                spacing: 6px;
+                                Text {
+                                    text: "•";
+                                    color: root.theme.accent;
+                                    font-size: 13px;
+                                    font-weight: 800;
+                                }
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: block.text;
+                                    color: root.theme.text-primary;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            // Normal Paragraph
+                            if block.kind == "paragraph" : HorizontalLayout {
+                                padding-left: 6px;
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: block.text;
+                                    color: root.theme.text-secondary;
+                                    font-size: 13px;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            // Empty State Hint
+                            if block.kind == "empty" : Rectangle {
+                                background: root.theme.card-bg;
+                                border-radius: 7px;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 4px;
+                                    Text {
+                                        text: block.text;
+                                        color: root.theme.text-secondary;
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: block.subtext;
+                                        color: root.theme.text-muted;
+                                        font-size: 11px;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom Footer for Note Mode
+                Rectangle {
+                    height: 26px;
+                    background: root.theme.surface-bg;
+                    border-radius: 6px;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 12px;
+                        alignment: space-between;
+
+                        Text {
+                            text: root.note-status-text != ""
+                                ? root.note-status-text
+                                : "↵ Save in '''...''' • !file+Space or Tab Switch .md • ↑↓ Scroll Preview • Esc Back";
+                            color: root.note-status-text != "" ? root.theme.accent : root.theme.text-muted;
+                            font-size: 11px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: "markdown/" + root.active-note-file;
+                            color: root.theme.accent;
+                            font-size: 11px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // =====================================================================
+            // Fuzzy-Ranked Suggestion Results (Shown when NOT in Note Mode)
+            // =====================================================================
+            if !root.is-note-mode && root.results.length > 0 : ScrollView {
+                vertical-stretch: 1;
+                width: 100%;
+                content-y <=> root.scroll-y;
+
+                VerticalLayout {
+                    spacing: 3px;
+                    padding-right: 4px;
+                    alignment: start;
+
+                    for item[index] in root.results : VerticalLayout {
+                        spacing: 3px;
+
+                        if item.is-first-in-category : Rectangle {
+                            height: 22px;
+                            background: transparent;
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                alignment: start;
+
+                                Text {
+                                    text: item.category-header;
+                                    color: root.theme.accent;
+                                    font-size: 10px;
+                                    font-weight: 800;
+                                    letter-spacing: 0.8px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: 42px;
+                            border-radius: 7px;
+                            background: index == root.selected-index ? root.theme.selected-bg : (row-touch.has-hover ? root.theme.hover-bg : transparent);
+                            border-width: index == root.selected-index ? 1px : 0px;
+                            border-color: root.theme.accent;
+                            clip: true;
+
+                            row-touch := TouchArea {
+                                width: 100%;
+                                height: 100%;
+                                mouse-cursor: pointer;
+
+                                moved => {
+                                    if (root.selected-index != index && !root.context-menu-visible) {
+                                        root.selected-index = index;
+                                    }
+                                }
+
+                                pointer-event(ev) => {
+                                    if (ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down) {
+                                        root.context-menu-visible = false;
+                                        root.selected-index = index;
+                                        root.activate-item(index);
+                                    } else if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.down) {
+                                        root.selected-index = index;
+                                        root.context-menu-index = index;
+                                        root.context-menu-can-elevate = item.can-elevate;
+                                        root.context-menu-x = Math.min(self.mouse-x + 16px, root.width - 220px);
+                                        root.context-menu-y = Math.min(self.absolute-position.y - root.absolute-position.y + self.mouse-y, root.height - 80px);
+                                        root.context-menu-visible = true;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 10px;
+                                alignment: stretch;
+
+                                // Left Category Icon Pill
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: 6px;
+                                        background: root.theme.card-bg;
+
+                                        Text {
+                                            text: item.icon-text;
+                                            font-size: 13px;
+                                            color: root.theme.accent;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                // Single-line Title
+                                Text {
+                                    horizontal-stretch: 1;
+                                    min-width: 0px;
+                                    text: item.title;
+                                    color: root.theme.text-primary;
+                                    font-size: 14px;
+                                    font-weight: index == root.selected-index ? 600 : 500;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+
+                                // Fuzzy Match Score Pill
+                                if item.score-text != "" : VerticalLayout {
+                                    alignment: center;
+                                    Text {
+                                        text: item.score-text;
+                                        color: root.theme.text-muted;
+                                        font-size: 10px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                // Category Badge
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        height: 22px;
+                                        width: 68px;
+                                        border-radius: 5px;
+                                        background: root.theme.card-bg;
+
+                                        Text {
+                                            text: item.badge;
+                                            color: index == root.selected-index ? root.theme.accent : root.theme.text-muted;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom Hint Footer (Normal Mode)
+            if !root.is-note-mode && root.results.length > 0 : Rectangle {
+                height: 26px;
+                background: root.theme.surface-bg;
+                border-radius: 6px;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 12px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "↑↓/Wheel Navigate • ↵/Click Open • Ctrl+↵ Admin • Esc Clear/Hide";
+                        color: root.theme.text-muted;
+                        font-size: 11px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: (root.selected-index + 1) + " / " + root.results.length;
+                        color: root.theme.text-muted;
+                        font-size: 11px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Right-Click Context Menu Overlay
+        if root.context-menu-visible : TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => {
+                root.context-menu-visible = false;
+            }
+
+            Rectangle {
+                x: root.context-menu-x;
+                y: root.context-menu-y;
+                width: 205px;
+                height: root.context-menu-can-elevate ? 72px : 40px;
+                background: root.theme.surface-bg;
+                border-color: root.theme.border;
+                border-width: 1px;
+                border-radius: 8px;
+                clip: true;
+
+                VerticalLayout {
+                    padding: 4px;
+                    spacing: 2px;
+
+                    Rectangle {
+                        height: 30px;
+                        border-radius: 5px;
+                        background: open-item-touch.has-hover ? root.theme.selected-bg : transparent;
+
+                        open-item-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.context-menu-visible = false;
+                                root.activate-item(root.context-menu-index);
+                            }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            Text {
+                                text: "▶ Open / Execute";
+                                color: root.theme.text-primary;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    if root.context-menu-can-elevate : Rectangle {
+                        height: 30px;
+                        border-radius: 5px;
+                        background: admin-item-touch.has-hover ? root.theme.selected-bg : transparent;
+
+                        admin-item-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.context-menu-visible = false;
+                                root.run-item-admin(root.context-menu-index);
+                            }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            Text {
+                                text: "⚡ Run as Administrator";
+                                color: root.theme.accent;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component SettingsWindow inherits Window {
+    title: "Command Palette Settings";
+    preferred-width: 920px;
+    preferred-height: 650px;
+    min-width: 760px;
+    min-height: 500px;
+    background: root.theme.window-bg;
+    icon: root.app-icon;
+
+    in property <image> app-icon;
+    in-out property <string> theme-mode: "powertoys";
+    in-out property <UIThemeColors> theme: {
+        window-bg: #1f1f1f,
+        surface-bg: #2b2b2b,
+        card-bg: #282828,
+        hover-bg: #323232,
+        selected-bg: #383838,
+        border: #3d3d3d,
+        accent: #60cdff,
+        text-primary: #ffffff,
+        text-secondary: #d6d6d6,
+        text-muted: #9d9d9d,
+    };
+
+    // Custom Theme Hex Editor Fields
+    in-out property <string> custom-window-bg: "#1f1f1f";
+    in-out property <string> custom-surface-bg: "#2b2b2b";
+    in-out property <string> custom-card-bg: "#282828";
+    in-out property <string> custom-selected-bg: "#383838";
+    in-out property <string> custom-border: "#3d3d3d";
+    in-out property <string> custom-accent: "#60cdff";
+    in-out property <string> custom-text-primary: "#ffffff";
+    in-out property <string> custom-text-muted: "#9d9d9d";
+
+    in-out property <int> active-tab: 0;
+    in-out property <bool> show-apps: true;
+    in-out property <string> custom-cmd-path: "cmd.exe";
+    in-out property <string> custom-settings-path: "ms-settings:";
+
+    in-out property <[UICategoryOrderItem]> category-order: [];
+    in-out property <[UIAppToggleItem]> app-items: [];
+    in-out property <[UISimpleEntry]> custom-commands: [];
+    in-out property <[UISimpleEntry]> custom-settings: [];
+    in-out property <[string]> custom-file-scan-paths: [];
+    in-out property <int> indexed-files-count: 0;
+    in-out property <[UIBangEntry]> bang-entries: [];
+    in-out property <string> status-message: "";
+
+    in-out property <string> app-filter-text: "";
+    in-out property <string> new-cmd-name: "";
+    in-out property <string> new-cmd-target: "";
+    in-out property <string> new-setting-name: "";
+    in-out property <string> new-setting-path: "";
+    in-out property <string> new-scan-path: "";
+    in-out property <string> new-bang-key: "";
+    in-out property <string> new-bang-url: "";
+
+    callback use-powertoys-theme();
+    callback save-custom-theme(string, string, string, string, string, string, string, string);
+    callback move-category-up(int);
+    callback move-category-down(int);
+    callback filter-apps-changed(string);
+    callback toggle-app-item(string, bool);
+    callback set-all-apps-visible(bool);
+    callback save-cmd-path(string);
+    callback add-custom-command(string, string);
+    callback remove-custom-command(int);
+    callback save-settings-path(string);
+    callback add-custom-setting(string, string);
+    callback remove-custom-setting(int);
+    callback add-file-scan-path(string);
+    callback remove-file-scan-path(int);
+    callback add-bang(string, string);
+    callback remove-bang(string);
+    callback reload-index();
+
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+
+        // Left Navigation Sidebar
+        Rectangle {
+            width: 225px;
+            background: root.theme.surface-bg;
+            border-width: 1px;
+            border-color: root.theme.border;
+            clip: true;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 6px;
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    padding-bottom: 12px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: root.app-icon;
+                            width: 28px;
+                            height: 28px;
+                        }
+                    }
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        alignment: center;
+                        Text {
+                            text: "Command Palette";
+                            color: root.theme.text-primary;
+                            font-size: 14px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "Ctrl + Space";
+                            color: root.theme.accent;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                for tab-label[idx] in [
+                    "1. Theme & Order",
+                    "2. Installed Apps",
+                    "3. Custom Commands",
+                    "4. Custom Settings",
+                    "5. Custom File Scan",
+                    "6. Web Search Bangs"
+                ] : Rectangle {
+                    height: 36px;
+                    border-radius: 7px;
+                    background: root.active-tab == idx ? root.theme.selected-bg : (nav-touch.has-hover ? root.theme.hover-bg : transparent);
+                    border-width: root.active-tab == idx ? 1px : 0px;
+                    border-color: root.theme.accent;
+                    clip: true;
+
+                    nav-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.active-tab = idx;
+                            root.status-message = "";
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 8px;
+                        Text {
+                            text: tab-label;
+                            color: root.active-tab == idx ? root.theme.accent : root.theme.text-secondary;
+                            font-size: 12px;
+                            font-weight: root.active-tab == idx ? 700 : 500;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                if root.status-message != "" : Rectangle {
+                    height: 34px;
+                    border-radius: 6px;
+                    background: root.theme.card-bg;
+                    border-width: 1px;
+                    border-color: root.theme.accent;
+                    clip: true;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        Text {
+                            text: root.status-message;
+                            color: root.theme.text-primary;
+                            font-size: 11px;
+                            overflow: elide;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 34px;
+                    border-radius: 7px;
+                    background: reindex-touch.has-hover ? root.theme.selected-bg : root.theme.card-bg;
+                    border-width: 1px;
+                    border-color: root.theme.border;
+
+                    reindex-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.reload-index();
+                        }
+                    }
+
+                    Text {
+                        text: "↻  Rescan All Indexes";
+                        color: root.theme.text-primary;
+                        font-size: 12px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Right Content Panel (Responsive & Scroll-Safe)
+        Rectangle {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            background: root.theme.window-bg;
+            clip: true;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                // ========================================================
+                // TAB 0: POWERTOYS DEFAULT THEME, CUSTOM THEME & ORDER
+                // ========================================================
+                if root.active-tab == 0 : ScrollView {
+                    vertical-stretch: 1;
+                    width: 100%;
+
+                    VerticalLayout {
+                        spacing: 12px;
+                        padding-right: 6px;
+                        alignment: start;
+
+                        Text {
+                            text: "Theme Configuration";
+                            color: root.theme.text-primary;
+                            font-size: 16px;
+                            font-weight: 700;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 10px;
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                height: 52px;
+                                border-radius: 8px;
+                                background: root.theme-mode == "powertoys" ? root.theme.selected-bg : root.theme.card-bg;
+                                border-width: root.theme-mode == "powertoys" ? 2px : 1px;
+                                border-color: root.theme-mode == "powertoys" ? root.theme.accent : root.theme.border;
+                                clip: true;
+
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.use-powertoys-theme();
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: 11px;
+                                            background: #1f1f1f;
+                                            border-width: 2px;
+                                            border-color: #60cdff;
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        alignment: center;
+                                        Text {
+                                            text: "PowerToys Command Palette (Default)";
+                                            color: root.theme.text-primary;
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: "Windows 11 Dark Acrylic (#1f1f1f) + Fluent Cyan (#60cdff)";
+                                            color: root.theme.text-muted;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 170px;
+                                height: 52px;
+                                border-radius: 8px;
+                                background: root.theme-mode == "custom" ? root.theme.selected-bg : root.theme.card-bg;
+                                border-width: root.theme-mode == "custom" ? 2px : 1px;
+                                border-color: root.theme-mode == "custom" ? root.theme.accent : root.theme.border;
+                                clip: true;
+
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.save-custom-theme(
+                                            root.custom-window-bg,
+                                            root.custom-surface-bg,
+                                            root.custom-card-bg,
+                                            root.custom-selected-bg,
+                                            root.custom-border,
+                                            root.custom-accent,
+                                            root.custom-text-primary,
+                                            root.custom-text-muted
+                                        );
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    padding: 8px;
+                                    alignment: center;
+                                    Text {
+                                        text: "🎨 Custom Theme";
+                                        color: root.theme.text-primary;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.theme-mode == "custom" ? "Active" : "Click to Activate";
+                                        color: root.theme.accent;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Custom Theme Hex Color Builder Card
+                        Rectangle {
+                            border-radius: 8px;
+                            background: root.theme.card-bg;
+                            border-width: 1px;
+                            border-color: root.theme.border;
+                            clip: true;
+
+                            VerticalLayout {
+                                padding: 12px;
+                                spacing: 8px;
+
+                                HorizontalLayout {
+                                    alignment: space-between;
+                                    Text {
+                                        text: "Custom Theme Builder (Hex #RRGGBB)";
+                                        color: root.theme.text-primary;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Rectangle {
+                                        width: 155px;
+                                        height: 28px;
+                                        border-radius: 6px;
+                                        background: root.theme.accent;
+                                        TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.save-custom-theme(
+                                                    root.custom-window-bg,
+                                                    root.custom-surface-bg,
+                                                    root.custom-card-bg,
+                                                    root.custom-selected-bg,
+                                                    root.custom-border,
+                                                    root.custom-accent,
+                                                    root.custom-text-primary,
+                                                    root.custom-text-muted
+                                                );
+                                            }
+                                        }
+                                        Text {
+                                            text: "Apply Custom Theme";
+                                            color: #000000;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                // Row 1 of Hex Inputs
+                                HorizontalLayout {
+                                    spacing: 8px;
+
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Window BG"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-window-bg; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Search Bar BG"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-surface-bg; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Card BG"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-card-bg; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Selected Row BG"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-selected-bg; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                }
+
+                                // Row 2 of Hex Inputs
+                                HorizontalLayout {
+                                    spacing: 8px;
+
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Border Color"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-border; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Accent Color"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-accent; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Primary Text"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-text-primary; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
+                                        Text { text: "Muted Text"; color: root.theme.text-muted; font-size: 11px; }
+                                        Rectangle {
+                                            height: 28px; border-radius: 5px; background: root.theme.surface-bg; border-width: 1px; border-color: root.theme.border;
+                                            TextInput { x: 8px; width: parent.width - 16px; height: 100%; text <=> root.custom-text-muted; color: root.theme.text-primary; font-size: 12px; vertical-alignment: center; single-line: true; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Category Tie-Breaker Order (Suggestions rank by Fuzzy Score first)";
+                            color: root.theme.accent;
+                            font-size: 12px;
+                            font-weight: 700;
+                        }
+
+                        VerticalLayout {
+                            spacing: 6px;
+                            for cat[idx] in root.category-order : Rectangle {
+                                height: 46px;
+                                border-radius: 8px;
+                                background: root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+                                clip: true;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 6px;
+                                            background: root.theme.surface-bg;
+                                            Text {
+                                                text: (idx + 1) + "";
+                                                color: root.theme.accent;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        alignment: center;
+                                        Text {
+                                            text: cat.label;
+                                            color: root.theme.text-primary;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: cat.description;
+                                            color: root.theme.text-muted;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 30px;
+                                            height: 26px;
+                                            border-radius: 6px;
+                                            background: up-touch.has-hover ? root.theme.selected-bg : root.theme.surface-bg;
+                                            up-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.move-category-up(idx); }
+                                            }
+                                            Text {
+                                                text: "↑";
+                                                color: root.theme.text-primary;
+                                                font-size: 13px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 30px;
+                                            height: 26px;
+                                            border-radius: 6px;
+                                            background: down-touch.has-hover ? root.theme.selected-bg : root.theme.surface-bg;
+                                            down-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.move-category-down(idx); }
+                                            }
+                                            Text {
+                                                text: "↓";
+                                                color: root.theme.text-primary;
+                                                font-size: 13px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========================================================
+                // TAB 1: INSTALLED APPS WITH CHECKBOXES TO SHOW / HIDE
+                // ========================================================
+                if root.active-tab == 1 : VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: space-between;
+                        Text {
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            text: "Installed Applications — Check to Show, Uncheck to Hide";
+                            color: root.theme.text-primary;
+                            font-size: 16px;
+                            font-weight: 700;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle {
+                                width: 86px;
+                                height: 28px;
+                                border-radius: 6px;
+                                background: show-all-touch.has-hover ? root.theme.selected-bg : root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+                                show-all-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.set-all-apps-visible(true); }
+                                }
+                                Text {
+                                    text: "☑ Show All";
+                                    color: root.theme.text-primary;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Rectangle {
+                                width: 86px;
+                                height: 28px;
+                                border-radius: 6px;
+                                background: hide-all-touch.has-hover ? root.theme.selected-bg : root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+                                hide-all-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.set-all-apps-visible(false); }
+                                }
+                                Text {
+                                    text: "☐ Hide All";
+                                    color: root.theme.text-primary;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 7px;
+                        background: root.theme.card-bg;
+                        border-width: 1px;
+                        border-color: root.theme.border;
+                        clip: true;
+
+                        if root.app-filter-text == "" : Text {
+                            x: 12px;
+                            text: "Filter installed applications by name...";
+                            color: root.theme.text-muted;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            height: 100%;
+                        }
+
+                        TextInput {
+                            x: 12px;
+                            width: parent.width - 24px;
+                            height: 100%;
+                            text <=> root.app-filter-text;
+                            color: root.theme.text-primary;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            single-line: true;
+                            edited => {
+                                root.filter-apps-changed(self.text);
+                            }
+                        }
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        width: 100%;
+
+                        VerticalLayout {
+                            spacing: 5px;
+                            padding-right: 6px;
+                            alignment: start;
+
+                            for app[idx] in root.app-items : Rectangle {
+                                height: 38px;
+                                border-radius: 7px;
+                                background: app-row-touch.has-hover ? root.theme.hover-bg : root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: app.visible ? root.theme.border : transparent;
+                                clip: true;
+
+                                app-row-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.toggle-app-item(app.name, !app.visible);
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 12px;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 20px;
+                                            height: 20px;
+                                            border-radius: 5px;
+                                            background: app.visible ? root.theme.accent : root.theme.surface-bg;
+                                            border-width: 1px;
+                                            border-color: app.visible ? root.theme.accent : root.theme.border;
+
+                                            Text {
+                                                text: app.visible ? "✓" : "";
+                                                color: #000000;
+                                                font-size: 13px;
+                                                font-weight: 800;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        text: app.name;
+                                        color: app.visible ? root.theme.text-primary : root.theme.text-muted;
+                                        font-size: 13px;
+                                        font-weight: app.visible ? 600 : 400;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: app.visible ? "Shown in Palette" : "Hidden";
+                                        color: app.visible ? root.theme.accent : root.theme.text-muted;
+                                        font-size: 11px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========================================================
+                // TAB 2: CUSTOM COMMANDS (SEPARATED & SIMPLIFIED)
+                // ========================================================
+                if root.active-tab == 2 : VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Custom Commands";
+                        color: root.theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+
+                    Rectangle {
+                        height: 46px;
+                        border-radius: 8px;
+                        background: root.theme.card-bg;
+                        border-width: 1px;
+                        border-color: root.theme.border;
+                        clip: true;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+
+                            Text {
+                                width: 135px;
+                                text: "Default CMD Path:";
+                                color: root.theme.text-secondary;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                alignment: center;
+                                Rectangle {
+                                    height: 28px;
+                                    border-radius: 6px;
+                                    background: root.theme.surface-bg;
+                                    border-width: 1px;
+                                    border-color: root.theme.border;
+                                    clip: true;
+
+                                    TextInput {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        height: 100%;
+                                        text <=> root.custom-cmd-path;
+                                        color: root.theme.text-primary;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 80px;
+                                    height: 28px;
+                                    border-radius: 6px;
+                                    background: root.theme.accent;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.save-cmd-path(root.custom-cmd-path); }
+                                    }
+                                    Text {
+                                        text: "Save";
+                                        color: #000000;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 94px;
+                        border-radius: 8px;
+                        background: root.theme.card-bg;
+                        border-width: 1px;
+                        border-color: root.theme.border;
+                        clip: true;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                    width: 190px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.surface-bg;
+                                    border-width: 1px;
+                                    border-color: root.theme.border;
+                                    clip: true;
+                                    if root.new-cmd-name == "" : Text {
+                                        x: 8px;
+                                        text: "Name (e.g. Flush DNS)";
+                                        color: root.theme.text-muted;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        height: 100%;
+                                    }
+                                    TextInput {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        height: 100%;
+                                        text <=> root.new-cmd-name;
+                                        color: root.theme.text-primary;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                    }
+                                }
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    min-width: 0px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.surface-bg;
+                                    border-width: 1px;
+                                    border-color: root.theme.border;
+                                    clip: true;
+                                    if root.new-cmd-target == "" : Text {
+                                        x: 8px;
+                                        text: "Command or EXE Path (e.g. ipconfig /flushdns)";
+                                        color: root.theme.text-muted;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        height: 100%;
+                                    }
+                                    TextInput {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        height: 100%;
+                                        text <=> root.new-cmd-target;
+                                        color: root.theme.text-primary;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 125px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.accent;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            if (root.new-cmd-name != "" && root.new-cmd-target != "") {
+                                                root.add-custom-command(root.new-cmd-name, root.new-cmd-target);
+                                                root.new-cmd-name = "";
+                                                root.new-cmd-target = "";
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: "+ Add Command";
+                                        color: #000000;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Enter a command name and the shell command or executable path to run.";
+                                color: root.theme.text-muted;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Saved Custom Commands (" + root.custom-commands.length + ")";
+                        color: root.theme.accent;
+                        font-size: 12px;
+                        font-weight: 700;
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        width: 100%;
+
+                        VerticalLayout {
+                            spacing: 6px;
+                            padding-right: 6px;
+                            alignment: start;
+
+                            for item[idx] in root.custom-commands : Rectangle {
+                                height: 44px;
+                                border-radius: 8px;
+                                background: root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+                                clip: true;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        alignment: center;
+                                        Text {
+                                            text: "⚡ " + item.name;
+                                            color: root.theme.text-primary;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: item.target;
+                                            color: root.theme.text-muted;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 72px;
+                                            height: 26px;
+                                            border-radius: 6px;
+                                            background: root.theme.surface-bg;
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.remove-custom-command(idx); }
+                                            }
+                                            Text {
+                                                text: "Remove";
+                                                color: #fda4af;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========================================================
+                // TAB 3: CUSTOM SYSTEM SETTINGS (SEPARATED & SIMPLIFIED)
+                // ========================================================
+                if root.active-tab == 3 : VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Custom System Settings";
+                        color: root.theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+
+                    Rectangle {
+                        height: 46px;
+                        border-radius: 8px;
+                        background: root.theme.card-bg;
+                        border-width: 1px;
+                        border-color: root.theme.border;
+                        clip: true;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 8px;
+
+                            Text {
+                                width: 155px;
+                                text: "Default Settings URI/Path:";
+                                color: root.theme.text-secondary;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                min-width: 0px;
+                                alignment: center;
+                                Rectangle {
+                                    height: 28px;
+                                    border-radius: 6px;
+                                    background: root.theme.surface-bg;
+                                    border-width: 1px;
+                                    border-color: root.theme.border;
+                                    clip: true;
+
+                                    TextInput {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        height: 100%;
+                                        text <=> root.custom-settings-path;
+                                        color: root.theme.text-primary;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 80px;
+                                    height: 28px;
+                                    border-radius: 6px;
+                                    background: root.theme.accent;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.save-settings-path(root.custom-settings-path); }
+                                    }
+                                    Text {
+                                        text: "Save";
+                                        color: #000000;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 94px;
+                        border-radius: 8px;
+                        background: root.theme.card-bg;
+                        border-width: 1px;
+                        border-color: root.theme.border;
+                        clip: true;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                    width: 190px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.surface-bg;
+                                    border-width: 1px;
+                                    border-color: root.theme.border;
+                                    clip: true;
+                                    if root.new-setting-name == "" : Text {
+                                        x: 8px;
+                                        text: "Name (e.g. Device Manager)";
+                                        color: root.theme.text-muted;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        height: 100%;
+                                    }
+                                    TextInput {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        height: 100%;
+                                        text <=> root.new-setting-name;
+                                        color: root.theme.text-primary;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                    }
+                                }
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    min-width: 0px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.surface-bg;
+                                    border-width: 1px;
+                                    border-color: root.theme.border;
+                                    clip: true;
+                                    if root.new-setting-path == "" : Text {
+                                        x: 8px;
+                                        text: "Path or URI (e.g. devmgmt.msc or ms-settings:privacy)";
+                                        color: root.theme.text-muted;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        height: 100%;
+                                    }
+                                    TextInput {
+                                        x: 8px;
+                                        width: parent.width - 16px;
+                                        height: 100%;
+                                        text <=> root.new-setting-path;
+                                        color: root.theme.text-primary;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 125px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.accent;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            if (root.new-setting-name != "" && root.new-setting-path != "") {
+                                                root.add-custom-setting(root.new-setting-name, root.new-setting-path);
+                                                root.new-setting-name = "";
+                                                root.new-setting-path = "";
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: "+ Add Setting";
+                                        color: #000000;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Examples: devmgmt.msc (Device Manager), sysdm.cpl (System Properties), ms-settings:startupapps";
+                                color: root.theme.text-muted;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Saved Custom Settings (" + root.custom-settings.length + ")";
+                        color: root.theme.accent;
+                        font-size: 12px;
+                        font-weight: 700;
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        width: 100%;
+
+                        VerticalLayout {
+                            spacing: 6px;
+                            padding-right: 6px;
+                            alignment: start;
+
+                            for item[idx] in root.custom-settings : Rectangle {
+                                height: 44px;
+                                border-radius: 8px;
+                                background: root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+                                clip: true;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        alignment: center;
+                                        Text {
+                                            text: "⚙ " + item.name;
+                                            color: root.theme.text-primary;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: item.target;
+                                            color: root.theme.text-muted;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 72px;
+                                            height: 26px;
+                                            border-radius: 6px;
+                                            background: root.theme.surface-bg;
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.remove-custom-setting(idx); }
+                                            }
+                                            Text {
+                                                text: "Remove";
+                                                color: #fda4af;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========================================================
+                // TAB 4: CUSTOM FILE PATH SCAN (ONLY SCANS ADDED PATHS)
+                // ========================================================
+                if root.active-tab == 4 : VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Custom File Scan Paths (Open Files Directly)";
+                        color: root.theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+
+                    Rectangle {
+                        height: 88px;
+                        border-radius: 8px;
+                        background: root.theme.card-bg;
+                        border-width: 1px;
+                        border-color: root.theme.border;
+                        clip: true;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    min-width: 0px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.surface-bg;
+                                    border-width: 1px;
+                                    border-color: root.theme.border;
+                                    clip: true;
+                                    if root.new-scan-path == "" : Text {
+                                        x: 10px;
+                                        text: "Enter folder path to scan its files (e.g. C:\\Users\\You\\Documents)";
+                                        color: root.theme.text-muted;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                        height: 100%;
+                                    }
+                                    TextInput {
+                                        x: 10px;
+                                        width: parent.width - 20px;
+                                        height: 100%;
+                                        text <=> root.new-scan-path;
+                                        color: root.theme.text-primary;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        single-line: true;
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 130px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: root.theme.accent;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            if (root.new-scan-path != "") {
+                                                root.add-file-scan-path(root.new-scan-path);
+                                                root.new-scan-path = "";
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: "+ Add Scan Path";
+                                        color: #000000;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Only paths added here are scanned (" + root.indexed-files-count + " files currently indexed).";
+                                color: root.theme.text-muted;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Active Custom Scan Paths (" + root.custom-file-scan-paths.length + ")";
+                        color: root.theme.accent;
+                        font-size: 12px;
+                        font-weight: 700;
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        width: 100%;
+
+                        VerticalLayout {
+                            spacing: 6px;
+                            padding-right: 6px;
+                            alignment: start;
+
+                            for scan-dir[idx] in root.custom-file-scan-paths : Rectangle {
+                                height: 40px;
+                                border-radius: 8px;
+                                background: root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+                                clip: true;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        text: "📁  " + scan-dir;
+                                        color: root.theme.text-primary;
+                                        font-size: 13px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 72px;
+                                            height: 26px;
+                                            border-radius: 6px;
+                                            background: root.theme.surface-bg;
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.remove-file-scan-path(idx); }
+                                            }
+                                            Text {
+                                                text: "Remove";
+                                                color: #fda4af;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========================================================
+                // TAB 5: WEB BANG SHORTCUTS
+                // ========================================================
+                if root.active-tab == 5 : VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Prefix-Free Web Search Bangs";
+                        color: root.theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            width: 115px;
+                            height: 32px;
+                            border-radius: 6px;
+                            background: root.theme.card-bg;
+                            border-width: 1px;
+                            border-color: root.theme.border;
+                            clip: true;
+                            if root.new-bang-key == "" : Text {
+                                x: 10px;
+                                text: "Key (e.g. yt)";
+                                color: root.theme.text-muted;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                height: 100%;
+                            }
+                            TextInput {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: 100%;
+                                text <=> root.new-bang-key;
+                                color: root.theme.text-primary;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                single-line: true;
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            height: 32px;
+                            border-radius: 6px;
+                            background: root.theme.card-bg;
+                            border-width: 1px;
+                            border-color: root.theme.border;
+                            clip: true;
+                            if root.new-bang-url == "" : Text {
+                                x: 10px;
+                                text: "URL with {q} (e.g. https://www.youtube.com/results?search_query={q})";
+                                color: root.theme.text-muted;
+                                font-size: 12px;
+                                overflow: elide;
+                                vertical-alignment: center;
+                                height: 100%;
+                            }
+                            TextInput {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: 100%;
+                                text <=> root.new-bang-url;
+                                color: root.theme.text-primary;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                single-line: true;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 105px;
+                            height: 32px;
+                            border-radius: 6px;
+                            background: root.theme.accent;
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    if (root.new-bang-key != "" && root.new-bang-url != "") {
+                                        root.add-bang(root.new-bang-key, root.new-bang-url);
+                                        root.new-bang-key = "";
+                                        root.new-bang-url = "";
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "+ Add Bang";
+                                color: #000000;
+                                font-size: 12px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        width: 100%;
+
+                        VerticalLayout {
+                            spacing: 5px;
+                            padding-right: 6px;
+                            alignment: start;
+
+                            for bang[idx] in root.bang-entries : Rectangle {
+                                height: 38px;
+                                border-radius: 7px;
+                                background: root.theme.card-bg;
+                                border-width: 1px;
+                                border-color: root.theme.border;
+                                clip: true;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 10px;
+
+                                    Text {
+                                        width: 65px;
+                                        text: "[" + bang.key + "]";
+                                        color: root.theme.accent;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        min-width: 0px;
+                                        text: bang.url;
+                                        color: root.theme.text-secondary;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 72px;
+                                            height: 24px;
+                                            border-radius: 5px;
+                                            background: root.theme.surface-bg;
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.remove-bang(bang.key); }
+                                            }
+                                            Text {
+                                                text: "Remove";
+                                                color: #fda4af;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
